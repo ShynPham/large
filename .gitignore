@@ -18,3 +18,17 @@ build/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Agent
+AGENTS.md
+
+# Streamlit secrets
+.streamlit/secrets.toml
+
+# Streamlit local settings
+.streamlit/config.toml
+
+# Database and local data files
+*.db
+*.sqlite
+*.sqlite3

@@ -67,3 +67,63 @@ def most_requested(connection, start_date, end_date):
         cursor.execute(sql, (start_date, end_date))
         columns = [column[0] for column in cursor.description]
         return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+#Inventory Summary and Evaluation by Location or Category
+
+def inventory_summary(connection, group_by="Category", stock_status=None, min_value=0.0):
+    if group_by == "Category":
+        select_col = "c.CategoryName AS group_name"
+        group_col = "c.CategoryName"
+    else:
+        select_col = "l.LocationName AS group_name"
+        group_col = "l.LocationName"
+
+    sql = f"""
+        SELECT {select_col},
+               COUNT(i.ItemID) AS item_count,
+               COALESCE(SUM(i.QuantityOnHand), 0) AS total_units_on_hand,
+               ROUND(COALESCE(SUM(i.InventoryValueUSD), 0)::numeric, 2) AS total_inventory_value_usd,
+               ROUND(COALESCE(AVG(i.EstimatedUnitCostUSD), 0)::numeric, 2) AS avg_unit_cost_usd
+        FROM Item AS i
+        JOIN Subcategory AS s ON i.SubcategoryName = s.SubcategoryName
+        JOIN Category AS c ON s.CategoryName = c.CategoryName
+        JOIN Location AS l ON i.LocationID = l.LocationID
+        WHERE (%s::text IS NULL OR i.StockStatus = %s)
+        GROUP BY {group_col}
+        HAVING COALESCE(SUM(i.InventoryValueUSD), 0) >= %s
+        ORDER BY total_inventory_value_usd DESC, group_name ASC
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql, (stock_status, stock_status, min_value))
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+# Sourcing Supplies Breakdown 
+def sourcing_supplies(connection, supplier_id=None, group_by="Subcategory"):
+
+    grp_field = "s.SubcategoryName" if group_by == "Subcategory" else "c.CategoryName"
+    grp_alias = "subcategory" if group_by == "Subcategory" else "category"
+
+    sql = f"""
+        SELECT sup.SupplierID AS supplier_id,
+               sup.SupplierName AS supplier_name,
+               {grp_field} AS {grp_alias},
+               COUNT(i.ItemID) AS sku_count,
+               COALESCE(SUM(i.QuantityOnHand), 0) AS total_units,
+               ROUND(COALESCE(AVG(i.EstimatedUnitCostUSD), 0)::numeric, 2) AS avg_unit_cost_usd,
+               ROUND(COALESCE(SUM(i.InventoryValueUSD), 0)::numeric, 2) AS total_sourcing_value_usd
+        FROM Item AS i
+        JOIN Supplier AS sup ON i.SupplierID = sup.SupplierID
+        JOIN Subcategory AS s ON i.SubcategoryName = s.SubcategoryName
+        JOIN Category AS c ON s.CategoryName = c.CategoryName
+        WHERE (%s::text IS NULL OR sup.SupplierID = %s)
+        GROUP BY sup.SupplierID, sup.SupplierName, {grp_field}
+        ORDER BY sup.SupplierName ASC, total_sourcing_value_usd DESC
+    """
+
+    with connection.cursor() as cursor:
+        cursor.execute(sql, (supplier_id, supplier_id))
+        columns = [column[0] for column in cursor.description]
+        return [dict(zip(columns, row)) for row in cursor.fetchall()]
